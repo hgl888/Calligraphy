@@ -3,13 +3,17 @@ package uk.co.chrisjenx.calligraphy;
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.content.Context;
+import android.graphics.Typeface;
 import android.os.Build;
+import android.support.v7.widget.Toolbar;
 import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.widget.TextView;
+
+import java.lang.ref.WeakReference;
+import java.lang.reflect.Method;
 
 class CalligraphyFactory {
 
@@ -90,10 +94,10 @@ class CalligraphyFactory {
         return resourceEntryName.equalsIgnoreCase(matches);
     }
 
-    private final int mAttributeId;
+    private final int[] mAttributeId;
 
     public CalligraphyFactory(int attributeId) {
-        this.mAttributeId = attributeId;
+        this.mAttributeId = new int[]{attributeId};
     }
 
     /**
@@ -124,18 +128,8 @@ class CalligraphyFactory {
             // Try to get typeface attribute value
             // Since we're not using namespace it's a little bit tricky
 
-            // Try view xml attributes
-            String textViewFont = CalligraphyUtils.pullFontPathFromView(context, attrs, mAttributeId);
-
-            // Try view style attributes
-            if (TextUtils.isEmpty(textViewFont)) {
-                textViewFont = CalligraphyUtils.pullFontPathFromStyle(context, attrs, mAttributeId);
-            }
-
-            // Try View TextAppearance
-            if (TextUtils.isEmpty(textViewFont)) {
-                textViewFont = CalligraphyUtils.pullFontPathFromTextAppearance(context, attrs, mAttributeId);
-            }
+            // Check xml attrs, style attrs and text appearance for font path
+            String textViewFont = resolveFontPath(context, attrs);
 
             // Try theme attributes
             if (TextUtils.isEmpty(textViewFont)) {
@@ -155,30 +149,106 @@ class CalligraphyFactory {
         // AppCompat API21+ The ActionBar doesn't inflate default Title/SubTitle, we need to scan the
         // Toolbar(Which underlies the ActionBar) for its children.
         if (CalligraphyUtils.canCheckForV7Toolbar() && view instanceof android.support.v7.widget.Toolbar) {
-            final ViewGroup parent = (ViewGroup) view;
-            parent.getViewTreeObserver().addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
-                @TargetApi(Build.VERSION_CODES.JELLY_BEAN)
-                @Override
-                public void onGlobalLayout() {
-                    int childCount = parent.getChildCount();
-                    if (childCount != 0) {
-                        // Process children, defer draw as it has set the typeface.
-                        for (int i = 0; i < childCount; i++) {
-                            onViewCreated(parent.getChildAt(i), context, null);
-                        }
-                    }
-
-                    // Our dark deed is done
-                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN) {
-                        //noinspection deprecation
-                        parent.getViewTreeObserver().removeGlobalOnLayoutListener(this);
-                    } else {
-                        parent.getViewTreeObserver().removeOnGlobalLayoutListener(this);
-                    }
-                }
-            });
+            final Toolbar toolbar = (Toolbar) view;
+            toolbar.getViewTreeObserver().addOnGlobalLayoutListener(new ToolbarLayoutListener(this, context, toolbar));
         }
+
+        // Try to set typeface for custom views using interface method or via reflection if available
+        if (view instanceof HasTypeface) {
+            Typeface typeface = getDefaultTypeface(context, resolveFontPath(context, attrs));
+            if (typeface != null) {
+                ((HasTypeface) view).setTypeface(typeface);
+            }
+        } else if (CalligraphyConfig.get().isCustomViewTypefaceSupport() && CalligraphyConfig.get().isCustomViewHasTypeface(view)) {
+            final Method setTypeface = ReflectionUtils.getMethod(view.getClass(), "setTypeface");
+            String fontPath = resolveFontPath(context, attrs);
+            Typeface typeface = getDefaultTypeface(context, fontPath);
+            if (setTypeface != null && typeface != null) {
+                ReflectionUtils.invokeMethod(view, setTypeface, typeface);
+            }
+        }
+
     }
 
+    private Typeface getDefaultTypeface(Context context, String fontPath) {
+        if (TextUtils.isEmpty(fontPath)) {
+            fontPath = CalligraphyConfig.get().getFontPath();
+        }
+        if (!TextUtils.isEmpty(fontPath)) {
+            return TypefaceUtils.load(context.getAssets(), fontPath);
+        }
+        return null;
+    }
+
+    /**
+     * Resolving font path from xml attrs, style attrs or text appearance
+     */
+    private String resolveFontPath(Context context, AttributeSet attrs) {
+        // Try view xml attributes
+        String textViewFont = CalligraphyUtils.pullFontPathFromView(context, attrs, mAttributeId);
+
+        // Try view style attributes
+        if (TextUtils.isEmpty(textViewFont)) {
+            textViewFont = CalligraphyUtils.pullFontPathFromStyle(context, attrs, mAttributeId);
+        }
+
+        // Try View TextAppearance
+        if (TextUtils.isEmpty(textViewFont)) {
+            textViewFont = CalligraphyUtils.pullFontPathFromTextAppearance(context, attrs, mAttributeId);
+        }
+
+        return textViewFont;
+    }
+
+    private static class ToolbarLayoutListener implements ViewTreeObserver.OnGlobalLayoutListener {
+
+        static String BLANK = " ";
+
+        private final WeakReference<CalligraphyFactory> mCalligraphyFactory;
+        private final WeakReference<Context> mContextRef;
+        private final WeakReference<Toolbar> mToolbarReference;
+        private final CharSequence originalSubTitle;
+
+        private ToolbarLayoutListener(final CalligraphyFactory calligraphyFactory,
+                                      final Context context, Toolbar toolbar) {
+            mCalligraphyFactory = new WeakReference<>(calligraphyFactory);
+            mContextRef = new WeakReference<>(context);
+            mToolbarReference = new WeakReference<>(toolbar);
+            originalSubTitle = toolbar.getSubtitle();
+            toolbar.setSubtitle(BLANK);
+        }
+
+        @TargetApi(Build.VERSION_CODES.JELLY_BEAN)
+        @Override public void onGlobalLayout() {
+            final Toolbar toolbar = mToolbarReference.get();
+            final Context context = mContextRef.get();
+            final CalligraphyFactory factory = mCalligraphyFactory.get();
+            if (toolbar == null) return;
+            if (factory == null || context == null) {
+                removeSelf(toolbar);
+                return;
+            }
+
+            int childCount = toolbar.getChildCount();
+            if (childCount != 0) {
+                // Process children, defer draw as it has set the typeface.
+                for (int i = 0; i < childCount; i++) {
+                    factory.onViewCreated(toolbar.getChildAt(i), context, null);
+                }
+            }
+            removeSelf(toolbar);
+            toolbar.setSubtitle(originalSubTitle);
+        }
+
+        private void removeSelf(final Toolbar toolbar) {// Our dark deed is done
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN) {
+                //noinspection deprecation
+                toolbar.getViewTreeObserver().removeGlobalOnLayoutListener(this);
+            } else {
+                toolbar.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+            }
+        }
+
+    }
 
 }

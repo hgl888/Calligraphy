@@ -13,11 +13,11 @@ Are you fed up of Custom Views to set fonts? Or traversing the ViewTree to find 
 
 ### Dependency
 
-Include the dependency [Download (.aar)](http://search.maven.org/remotecontent?filepath=uk/co/chrisjenx/calligraphy/2.1.0/calligraphy-2.1.0.aar) :
+Include the dependency [Download (.aar)](http://search.maven.org/remotecontent?filepath=uk/co/chrisjenx/calligraphy/2.2.0/calligraphy-2.2.0.aar) :
 
 ```groovy
 dependencies {
-    compile 'uk.co.chrisjenx:calligraphy:2.1.0'
+    compile 'uk.co.chrisjenx:calligraphy:2.2.0'
 }
 ```
 ### Add Fonts
@@ -49,7 +49,7 @@ public void onCreate() {
 ```
 
 _Note: You don't need to define `CalligraphyConfig` but the library will apply
-no default font and use the default attribute of `R.id.fontPath`._
+no default font and use the default attribute of `R.attr.fontPath`._
 
 ### Inject into Context
 
@@ -159,14 +159,27 @@ SpannableStringBuilder sBuilder = new SpannableStringBuilder();
 sBuilder.append("Hello!") // Bold this
         .append("I use Calligraphy"); // Default TextView font.
 // Create the Typeface you want to apply to certain text
-CalligraphyTypefaceSpan typefaceSpan = new CalligraphyTypefaceSpan(TypefaceUtils.load(getAssets(), "fonts/Roboto-Bold.ttf");
+CalligraphyTypefaceSpan typefaceSpan = new CalligraphyTypefaceSpan(TypefaceUtils.load(getAssets(), "fonts/Roboto-Bold.ttf"));
 // Apply typeface to the Spannable 0 - 6 "Hello!" This can of course by dynamic.
 sBuilder.setSpan(typefaceSpan, 0, 6, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
 setText(sBuilder, TextView.BufferType.SPANNABLE);
 ```
 Of course this is just an example. Your mileage may vary.
 
-#Colaborators
+### Exceptions / Pitfalls
+
+To our knowledge (try: `grep -r -e "void set[^(]*(Typeface " <android source dir>`) there are two standard Android widgets that have multiple methods to set typefaces. They are:
+
+ - android.support.v7.widget.SwitchCompat
+ - android.widget.Switch
+
+Both have a method called `setSwitchTypeface` that sets the typeface within the switch (e.g. on/off, yes/no). `SetTypeface` sets the typeface of the label. You will need to create your own subclass that overrides `setTypeface` and calls both `super.setTypeface` and `super.setSwitchTypeface`.
+
+
+
+
+
+#Collaborators
 
 - [@mironov-nsk](https://github.com/mironov-nsk)
 - [@Roman Zhilich](https://github.com/RomanZhilich)
@@ -196,3 +209,5 @@ If you feel this should be possible to do, please star [this issue](https://code
     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
     See the License for the specific language governing permissions and
     limitations under the License.
+
+[![Badge](http://www.libtastic.com/static/osbadges/79.png)](http://www.libtastic.com/technology/79/)
